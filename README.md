@@ -3,17 +3,17 @@
 配合 `上位机AI融合学习路线.md` 走。目标: 用 Python 搭一套多协议工业数据采集底座,
 再通过 MCP 把现场数据接给大模型。
 
-## 当前进度
+![混合协议上位机](shots/scada_app_mixed.png)
 
-| 阶段 | 内容 | 状态 |
-|---|---|---|
-| 准备 | venv + 依赖 + mock OPC UA server + 验证客户端 | ✅ 跑通 |
-| **阶段 1-2 核心** | **Driver 抽象层 + 点表 + 报警引擎 + PySide6 上位机** | ✅ **跑通 (2026-10-27)** |
-| **阶段 3** | **MCP Server —— 现场数据接给大模型 (6 个工具)** | ✅ **跑通 (2026-10-27)** |
-| **阶段 4** | **Modbus 驱动实测 + 混合协议点表 (OPC UA + Modbus 同表)** | ✅ **跑通 (2026-10-27 夜)** |
-| 阶段 5 | S7 / AB 驱动 + 接真实大模型 + 证书信任 + git/GitHub | 未开始 |
+> 上图是一张点表同时挂着 **OPC UA(1-8 行, `ns=2;s=...`)和 Modbus(9-16 行, `hr:`/`ir:`/`co:`)**
+> 的运行画面 —— 16 个点位, 一个采集器, 一套报警引擎, 上层完全不知道底下有两种协议。
 
-## 三分钟看懂这项目
+## 这个项目解决什么问题
+
+现场数据是"散"在各种协议里的: OPC UA 服务器、西门子 PLC、Modbus 仪表、AB 控制器。
+组态软件能做显示, 但**做不了推理** —— 报警一多, 老师傅的经验就没法沉淀成系统能力。
+
+这个项目把中间那一层补上:
 
 ```
 大模型 / AI 客户端
@@ -36,6 +36,18 @@
 
 > `points_mixed.yaml` 就是这个设计的证据: **一张点表同时挂 OPC UA 和 Modbus**,
 > 16 个点位, 一个采集器, 一个报警引擎, 一套 MCP 工具, 界面和数据层完全无感。
+
+## 当前进度
+
+| 阶段 | 内容 | 状态 |
+|---|---|---|
+| 准备 | venv + 依赖 + mock OPC UA server + 验证客户端 | ✅ 跑通 |
+| **阶段 1-2 核心** | **Driver 抽象层 + 点表 + 报警引擎 + PySide6 上位机** | ✅ **跑通 (2026-10-27)** |
+| **阶段 3** | **MCP Server —— 现场数据接给大模型 (6 个工具)** | ✅ **跑通 (2026-10-27)** |
+| **阶段 4** | **Modbus 驱动实测 + 混合协议点表 (OPC UA + Modbus 同表)** | ✅ **跑通 (2026-10-27 夜)** |
+| 阶段 5 | S7 / AB 驱动 + 接真实大模型 + 证书信任 | 未开始 |
+
+![报警演示](shots/scada_app_mixed_alarm.png)
 
 ## 环境
 
@@ -276,6 +288,44 @@ MCP server 进程自己持有 OPC UA 订阅, 值一直在 `collector.values` 缓
 大模型需要的是**事实**, 判断规则由上位机给 —— 规则化判断 + 大模型自由推理,
 比让大模型自己算阈值余量靠谱得多。
 
+### 工具返回长什么样(真实输出)
+
+`diagnose_tag("给煤机实际量")` 的返回(截断):
+
+```json
+{
+  "found": true,
+  "tag": {
+    "name": "给煤机实际量",
+    "source": "modbus",
+    "addr": "hr:2:2",
+    "unit": "t/h",
+    "alarm_hi": 4.0, "alarm_lo": 0.8, "deadband": 0.1, "alarm_level": "中"
+  },
+  "current": {
+    "value": 2.1932, "text": "2.19 t/h", "quality": "GOOD",
+    "age_ms": 429, "timestamp": "2026-10-27 16:39:18"
+  },
+  "state": "NORMAL", "state_text": "正常",
+  "margin": { "to_hi": 1.8068, "to_lo": 1.3932 },
+  "trend": {
+    "samples": 8, "window_seconds": 3.6,
+    "first": 2.1827, "last": 2.1932, "min": 2.1827, "max": 2.1999,
+    "delta": 0.0106, "rate_per_sec": 0.00295, "direction": "小幅波动",
+    "series": [2.1827, 2.1898, 2.1951, 2.1984, 2.1999, 2.1995, 2.1973, 2.1932]
+  },
+  "soe": [],
+  "related": [
+    { "name": "给煤机设定量", "value": 2.5, "text": "2.50 t/h", "alarm_state": "正常" }
+  ],
+  "assessment": "当前 2.19 t/h; 状态正常; 近期小幅波动(3.6 秒内 0.0106)"
+}
+```
+
+注意 `source: modbus` —— 大模型拿到的是**统一的工程量语义**,
+不需要知道这个值是从 Modbus 寄存器还是 OPC UA 节点来的。
+`assessment` 是上位机用规则算好的事实, 大模型在这基础上做根因推理。
+
 ### 接进 Claude Desktop
 
 `%APPDATA%\Claude\claude_desktop_config.json`:
@@ -457,8 +507,10 @@ UaExpert (免费, Unified Automation 出品) 装好后:
    写"这个函数返回一个字典"没用, 要写"什么时候该用它、返回什么、注意什么"。
    `instructions` 字段可以给推荐的调用顺序。
 
-6. **返回值建议用 `dict`**, 框架会自动生成 structured output,
-   客户端从 `result.structured_content` 直接拿到嵌套字典, 不用自己解析文本。
+6. **返回注解要带泛型: `-> dict[str, Any]`, 不能写裸 `-> dict`**。
+   裸 `dict` 框架**不生成 output_schema**, `result.structured_content` 是 None,
+   客户端只能自己去解析文本。带泛型之后客户端直接拿嵌套字典。
+   (实测: 裸 `dict` → output_schema=None; `dict[str, Any]` → 有 schema 且 structured_content 正常)
 
 7. **asyncua 默认 DEBUG 日志会刷爆 stderr** —— 订阅每推一个值打一行。
    `logging.getLogger("asyncua").setLevel(logging.WARNING)`。

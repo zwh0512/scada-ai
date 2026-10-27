@@ -105,7 +105,7 @@ LEVEL_TEXT = {1: "低", 2: "中", 3: "高"}
         "不传 source 返回全部点位; 传 source(如 opcua)只返回该连接源的点位。"
     )
 )
-async def list_tags(source: str = "") -> dict:
+async def list_tags(source: str = "") -> dict[str, Any]:
     """列点表配置。"""
     table, _ = _ctx()
     tags = table.points
@@ -146,7 +146,7 @@ async def list_tags(source: str = "") -> dict:
         "找不到就返回空列表, 建议再试 list_tags。"
     )
 )
-async def search_tags(keyword: str) -> dict:
+async def search_tags(keyword: str) -> dict[str, Any]:
     """按关键字搜点位。"""
     table, collector = _ctx()
     hits = collector.find_tags(keyword)
@@ -182,7 +182,7 @@ async def search_tags(keyword: str) -> dict:
         "age_ms 很大说明现场通信有问题, 要结合 get_alarms 看。"
     )
 )
-async def read_values(tag_names: list[str] | None = None) -> dict:
+async def read_values(tag_names: list[str] | None = None) -> dict[str, Any]:
     """读实时值。"""
     table, collector = _ctx()
 
@@ -254,7 +254,7 @@ async def read_values(tag_names: list[str] | None = None) -> dict:
         "排查问题时 active 和 history 都要看: active 看现在有什么问题, history 看之前发生过什么。"
     )
 )
-async def get_alarms(scope: str = "active", limit: int = 20) -> dict:
+async def get_alarms(scope: str = "active", limit: int = 20) -> dict[str, Any]:
     """查报警和 SOE 历史。"""
     _, collector = _ctx()
     scope = (scope or "active").lower()
@@ -286,7 +286,7 @@ async def get_alarms(scope: str = "active", limit: int = 20) -> dict:
         "排查'为什么这个点报警了'优先用这个工具, 不用再分别查多个工具拼。"
     )
 )
-async def diagnose_tag(tag_name: str) -> dict:
+async def diagnose_tag(tag_name: str) -> dict[str, Any]:
     """单点诊断。"""
     table, collector = _ctx()
 
@@ -380,7 +380,7 @@ async def diagnose_tag(tag_name: str) -> dict:
         "调用前先用 list_tags 确认点位可写。"
     )
 )
-async def write_value(tag_name: str, value: float) -> dict:
+async def write_value(tag_name: str, value: float) -> dict[str, Any]:
     """写点位(受 writable 白名单限制)。"""
     _, collector = _ctx()
     try:
@@ -438,7 +438,7 @@ def _fmt_value(lv: Any) -> str:
     return str(v)
 
 
-def _alarm_dict(event: AlarmEvent) -> dict:
+def _alarm_dict(event: AlarmEvent) -> dict[str, Any]:
     """SOE / 活动报警 -> 字典。"""
     return {
         "time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(event.ts)),
@@ -453,7 +453,7 @@ def _alarm_dict(event: AlarmEvent) -> dict:
     }
 
 
-def _trend(collector: Collector, name: str) -> dict:
+def _trend(collector: Collector, name: str) -> dict[str, Any]:
     """算一个点位的变化趋势。
 
     关键在 delta 和方向: 报警分析里"当前值超限"只是现象,

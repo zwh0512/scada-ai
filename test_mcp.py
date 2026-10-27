@@ -150,6 +150,9 @@ async def run_checks(client: Client) -> None:
     for t in listing.tools:
         desc = (t.description or "").strip()
         check(f"工具 {t.name} 有描述", len(desc) > 10, f"{len(desc)} 字")
+        # 返回注解必须带泛型 (-> dict[str, Any]), 否则框架不生成 output_schema,
+        # 客户端只能去解析文本, 而不是直接拿嵌套字典
+        check(f"工具 {t.name} 有 output_schema", t.output_schema is not None)
 
     # ---------------- 2. list_tags ----------------
     banner("[2/6] list_tags —— 点表配置")
@@ -199,6 +202,14 @@ async def run_checks(client: Client) -> None:
     # 点名读
     data = payload(await client.call_tool("read_values", {"tag_names": ["磨机电流"]}))
     check("点名读只回 1 条", isinstance(data, dict) and data.get("count") == 1, f"count={data.get('count') if isinstance(data, dict) else data}")
+
+    # structured_content: 客户端应该能直接拿到嵌套字典, 不用自己解析文本
+    raw = await client.call_tool("read_values", {})
+    check(
+        "返回带 structured_content",
+        isinstance(getattr(raw, "structured_content", None), dict),
+        type(getattr(raw, "structured_content", None)).__name__,
+    )
 
     # ---------------- 5. get_alarms ----------------
     banner("[5/6] get_alarms —— 报警与 SOE")
