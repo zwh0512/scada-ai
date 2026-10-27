@@ -1,0 +1,24 @@
+# ============================================================
+# 换行符统一 —— 避免 Windows 提交后每个文件都变成全量 diff
+# ============================================================
+* text=auto
+
+*.py    text eol=lf
+*.md    text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+*.txt   text eol=lf
+*.json  text eol=lf
+
+# Windows 脚本保持 CRLF
+*.ps1   text eol=crlf
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+# 二进制
+*.png   binary
+*.jpg   binary
+*.ico   binary
+*.pdf   binary
+*.exe   binary
+*.zip   binary

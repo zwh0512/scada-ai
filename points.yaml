@@ -1,0 +1,96 @@
+# ============================================================
+# 点表 —— 上位机的中枢
+# ============================================================
+# sources : 建哪些驱动、连到哪
+# points  : 点位清单, 采集/显示/报警全部由这里驱动
+#
+# 改一行 YAML 就能加一个点位、换一个设备、加一条报警规则,
+# 代码一行都不用动 —— 这就是组态软件的灵魂。
+
+sources:
+  opcua:
+    type: opcua
+    url: opc.tcp://localhost:4840/freeopcua/server/
+    namespace_uri: http://example.org/scada
+    sampling_interval: 500
+
+points:
+  # ---------------- Line1 磨机线 ----------------
+  - name: 磨机电流
+    source: opcua
+    addr: "ns=2;s=Plant1.Line1.MillCurrent"
+    type: float
+    unit: A
+    desc: Line1 磨机主轴电流
+    alarm_hi: 48.0
+    alarm_lo: 25.0
+    deadband: 1.5
+    alarm_level: 2
+
+  - name: 一次风温度
+    source: opcua
+    addr: "ns=2;s=Plant1.Line1.AirTemp"
+    type: float
+    unit: degC
+    desc: Line1 一次风预热温度
+    alarm_hi: 205.0
+    alarm_lo: 150.0
+    deadband: 2.0
+    alarm_level: 1
+
+  - name: 喷煤量
+    source: opcua
+    addr: "ns=2;s=Plant1.Line1.CoalRate"
+    type: float
+    unit: t/h
+    desc: Line1 喷煤量
+    alarm_hi: 4.0
+    alarm_lo: 0.8
+    deadband: 0.1
+    alarm_level: 2
+
+  - name: 磨机运行状态
+    source: opcua
+    addr: "ns=2;s=Plant1.Line1.RunState"
+    type: bool
+    desc: Line1 磨机运行标志
+
+  # ---------------- Line2 磨机线 ----------------
+  - name: 二线磨机电流
+    source: opcua
+    addr: "ns=2;s=Plant1.Line2.MillCurrent"
+    type: float
+    unit: A
+    desc: Line2 磨机主轴电流
+    alarm_hi: 48.0
+    alarm_lo: 25.0
+    deadband: 1.5
+    alarm_level: 2
+
+  - name: 二线一次风温度
+    source: opcua
+    addr: "ns=2;s=Plant1.Line2.AirTemp"
+    type: float
+    unit: degC
+    desc: Line2 一次风预热温度
+    alarm_hi: 205.0
+    alarm_lo: 150.0
+    deadband: 2.0
+    alarm_level: 1
+
+  - name: 二线喷煤量
+    source: opcua
+    addr: "ns=2;s=Plant1.Line2.CoalRate"
+    type: float
+    unit: t/h
+    desc: Line2 喷煤量
+    alarm_hi: 4.0
+    alarm_lo: 0.8
+    deadband: 0.1
+    alarm_level: 2
+
+  - name: 二线磨机运行状态
+    source: opcua
+    addr: "ns=2;s=Plant1.Line2.RunState"
+    type: bool
+    desc: Line2 磨机运行标志

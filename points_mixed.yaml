@@ -1,0 +1,177 @@
+# ============================================================
+# 混合协议点表 —— OPC UA + Modbus 同时挂一个采集器
+# ============================================================
+# 这个文件的意义: 证明"多协议抽象"不是三个脚本各写各的,
+# 而是**一张点表同时挂两种协议, 上层一行都不用改**。
+#
+# 采集器按 source 字段路由:
+#   source: opcua  -> OpcUaDriver  (订阅, 服务端推送)
+#   source: modbus -> ModbusDriver (轮询, Modbus 没有订阅)
+#
+# 上层拿到的永远是同一个 Tag / Driver 接口。
+
+sources:
+  opcua:
+    type: opcua
+    url: opc.tcp://localhost:4840/freeopcua/server/
+    namespace_uri: http://example.org/scada
+    sampling_interval: 500
+
+  modbus:
+    type: modbus
+    host: 127.0.0.1
+    port: 5020
+    unit_id: 1
+    # ★ 字节序: 工业第一大坑。mock server 按大端(abcd)存放,
+    #   换成 cdab 读出来就是一堆垃圾数字。现场必须实测。
+    word_order: abcd
+
+points:
+  # ================= OPC UA: Line1 喷煤线 =================
+  - name: 磨机电流
+    source: opcua
+    addr: "ns=2;s=Plant1.Line1.MillCurrent"
+    type: float
+    unit: A
+    desc: Line1 磨机主轴电流
+    alarm_hi: 48.0
+    alarm_lo: 25.0
+    deadband: 1.5
+    alarm_level: 2
+
+  - name: 一次风温度
+    source: opcua
+    addr: "ns=2;s=Plant1.Line1.AirTemp"
+    type: float
+    unit: degC
+    desc: Line1 一次风预热温度
+    alarm_hi: 205.0
+    alarm_lo: 150.0
+    deadband: 2.0
+    alarm_level: 1
+
+  - name: 喷煤量
+    source: opcua
+    addr: "ns=2;s=Plant1.Line1.CoalRate"
+    type: float
+    unit: t/h
+    desc: Line1 喷煤量
+    alarm_hi: 4.0
+    alarm_lo: 0.8
+    deadband: 0.1
+    alarm_level: 2
+
+  - name: 磨机运行状态
+    source: opcua
+    addr: "ns=2;s=Plant1.Line1.RunState"
+    type: bool
+    desc: Line1 磨机运行标志
+
+  # ================= OPC UA: Line2 喷煤线 =================
+  - name: 二线磨机电流
+    source: opcua
+    addr: "ns=2;s=Plant1.Line2.MillCurrent"
+    type: float
+    unit: A
+    desc: Line2 磨机主轴电流
+    alarm_hi: 48.0
+    alarm_lo: 25.0
+    deadband: 1.5
+    alarm_level: 2
+
+  - name: 二线一次风温度
+    source: opcua
+    addr: "ns=2;s=Plant1.Line2.AirTemp"
+    type: float
+    unit: degC
+    desc: Line2 一次风预热温度
+    alarm_hi: 205.0
+    alarm_lo: 150.0
+    deadband: 2.0
+    alarm_level: 1
+
+  - name: 二线喷煤量
+    source: opcua
+    addr: "ns=2;s=Plant1.Line2.CoalRate"
+    type: float
+    unit: t/h
+    desc: Line2 喷煤量
+    alarm_hi: 4.0
+    alarm_lo: 0.8
+    deadband: 0.1
+    alarm_level: 2
+
+  - name: 二线磨机运行状态
+    source: opcua
+    addr: "ns=2;s=Plant1.Line2.RunState"
+    type: bool
+    desc: Line2 磨机运行标志
+
+  # ================= Modbus: 给煤控制器 =================
+  - name: 给煤机设定量
+    source: modbus
+    addr: "hr:0:2"
+    type: float32
+    unit: t/h
+    desc: 给煤机设定值(Modbus holding register)
+    alarm_hi: 4.0
+    alarm_lo: 0.8
+    deadband: 0.1
+    alarm_level: 2
+    writable: true
+
+  - name: 给煤机实际量
+    source: modbus
+    addr: "hr:2:2"
+    type: float32
+    unit: t/h
+    desc: 给煤机实际给煤量
+    alarm_hi: 4.0
+    alarm_lo: 0.8
+    deadband: 0.1
+    alarm_level: 2
+
+  - name: 一次风压力
+    source: modbus
+    addr: "ir:0:2"
+    type: float32
+    unit: MPa
+    desc: 一次风压力(input register, 只读)
+
+  - name: 给煤机转速
+    source: modbus
+    addr: "hr:6"
+    type: int16
+    unit: rpm
+    desc: 给煤机实际转速
+
+  - name: 运行小时数
+    source: modbus
+    addr: "hr:7"
+    type: uint16
+    unit: h
+    desc: 给煤机累计运行时间
+
+  - name: 给煤机磨机电流
+    source: modbus
+    addr: "hr:8:2"
+    type: float32
+    unit: A
+    desc: 给煤机侧磨机电流(Modbus 采集)
+    alarm_hi: 48.0
+    alarm_lo: 25.0
+    deadband: 1.5
+    alarm_level: 2
+
+  - name: 设备状态码
+    source: modbus
+    addr: "ir:2"
+    type: uint16
+    desc: 给煤控制器状态字
+
+  - name: 启动信号
+    source: modbus
+    addr: "co:0"
+    type: bool
+    desc: 给煤机启动线圈
+    writable: true
