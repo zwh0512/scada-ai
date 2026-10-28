@@ -1,0 +1,306 @@
+# ============================================================
+# 四协议点表 —— OPC UA + Modbus + S7 + AB 同表
+# ============================================================
+# 阶段 2 的验收标准: 三种以上协议齐活, 上层零改动。
+#
+# 这个文件是整个项目"多协议抽象"最硬的证据:
+#   一个采集器, 四个协议, 一个报警引擎, 一套 MCP 工具, 一张界面。
+#
+# 点表地址前缀速查:
+#   opcua : ns=2;s=Plant1.Line1.MillCurrent
+#   modbus: hr:0:2 / ir:0:2 / co:0     (区域:起始:长度)
+#   s7    : db:1:0 / db:1:16:0          (区:DB号:字节偏移[:附加])
+#   eip   : 标签名, 或 Program:MainProgram.标签名
+
+sources:
+  opcua:
+    type: opcua
+    url: opc.tcp://localhost:4840/freeopcua/server/
+    namespace_uri: http://example.org/scada
+    sampling_interval: 500
+
+  modbus:
+    type: modbus
+    host: 127.0.0.1
+    port: 5020
+    unit_id: 1
+    # ★ Modbus 字节序必须现场实测。S7 是大端不用配, Modbus 要配。
+    word_order: abcd
+
+  s7:
+    type: s7
+    host: 127.0.0.1
+    port: 10200
+    rack: 0
+    slot: 1
+
+  eip:
+    type: eip
+    path: "127.0.0.1/1/0"
+    program: MainProgram
+
+points:
+  # ================= OPC UA: 喷煤线 =================
+  - name: 磨机电流
+    source: opcua
+    addr: "ns=2;s=Plant1.Line1.MillCurrent"
+    type: float
+    unit: A
+    desc: Line1 磨机主轴电流
+    alarm_hi: 48.0
+    alarm_lo: 25.0
+    deadband: 1.5
+    alarm_level: 2
+
+  - name: 一次风温度
+    source: opcua
+    addr: "ns=2;s=Plant1.Line1.AirTemp"
+    type: float
+    unit: degC
+    desc: Line1 一次风预热温度
+    alarm_hi: 205.0
+    alarm_lo: 150.0
+    deadband: 2.0
+    alarm_level: 1
+
+  - name: 喷煤量
+    source: opcua
+    addr: "ns=2;s=Plant1.Line1.CoalRate"
+    type: float
+    unit: t/h
+    desc: Line1 喷煤量
+    alarm_hi: 4.0
+    alarm_lo: 0.8
+    deadband: 0.1
+    alarm_level: 2
+
+  - name: 磨机运行状态
+    source: opcua
+    addr: "ns=2;s=Plant1.Line1.RunState"
+    type: bool
+    desc: Line1 磨机运行标志
+
+  - name: 二线磨机电流
+    source: opcua
+    addr: "ns=2;s=Plant1.Line2.MillCurrent"
+    type: float
+    unit: A
+    desc: Line2 磨机主轴电流
+    alarm_hi: 48.0
+    alarm_lo: 25.0
+    deadband: 1.5
+    alarm_level: 2
+
+  - name: 二线一次风温度
+    source: opcua
+    addr: "ns=2;s=Plant1.Line2.AirTemp"
+    type: float
+    unit: degC
+    desc: Line2 一次风预热温度
+    alarm_hi: 205.0
+    alarm_lo: 150.0
+    deadband: 2.0
+    alarm_level: 1
+
+  - name: 二线喷煤量
+    source: opcua
+    addr: "ns=2;s=Plant1.Line2.CoalRate"
+    type: float
+    unit: t/h
+    desc: Line2 喷煤量
+    alarm_hi: 4.0
+    alarm_lo: 0.8
+    deadband: 0.1
+    alarm_level: 2
+
+  - name: 二线磨机运行状态
+    source: opcua
+    addr: "ns=2;s=Plant1.Line2.RunState"
+    type: bool
+    desc: Line2 磨机运行标志
+
+  # ================= Modbus: 给煤控制器 =================
+  - name: 给煤机设定量
+    source: modbus
+    addr: "hr:0:2"
+    type: float32
+    unit: t/h
+    desc: 给煤机设定值(Modbus holding register)
+    alarm_hi: 4.0
+    alarm_lo: 0.8
+    deadband: 0.1
+    alarm_level: 2
+    writable: true
+
+  - name: 给煤机实际量
+    source: modbus
+    addr: "hr:2:2"
+    type: float32
+    unit: t/h
+    desc: 给煤机实际给煤量
+    alarm_hi: 4.0
+    alarm_lo: 0.8
+    deadband: 0.1
+    alarm_level: 2
+
+  - name: 一次风压力
+    source: modbus
+    addr: "ir:0:2"
+    type: float32
+    unit: MPa
+    desc: 一次风压力(input register, 只读)
+
+  - name: 给煤机转速
+    source: modbus
+    addr: "hr:6"
+    type: int16
+    unit: rpm
+    desc: 给煤机实际转速
+
+  - name: 运行小时数
+    source: modbus
+    addr: "hr:7"
+    type: uint16
+    unit: h
+    desc: 给煤机累计运行时间
+
+  - name: 给煤机磨机电流
+    source: modbus
+    addr: "hr:8:2"
+    type: float32
+    unit: A
+    desc: 给煤机侧磨机电流(Modbus 采集)
+    alarm_hi: 48.0
+    alarm_lo: 25.0
+    deadband: 1.5
+    alarm_level: 2
+
+  - name: 设备状态码
+    source: modbus
+    addr: "ir:2"
+    type: uint16
+    desc: 给煤控制器状态字
+
+  - name: 启动信号
+    source: modbus
+    addr: "co:0"
+    type: bool
+    desc: 给煤机启动线圈
+    writable: true
+
+  # ================= S7: 西门子给煤控制器 =================
+  - name: S7给煤量设定
+    source: s7
+    addr: "db:1:0"
+    type: float32
+    unit: t/h
+    desc: S7 侧给煤量设定值(DB1.DBD0, REAL)
+    alarm_hi: 4.0
+    alarm_lo: 0.8
+    deadband: 0.1
+    alarm_level: 2
+    writable: true
+
+  - name: S7给煤量实际
+    source: s7
+    addr: "db:1:4"
+    type: float32
+    unit: t/h
+    desc: S7 侧给煤量实际值(DB1.DBD4, REAL)
+
+  - name: S7一次风温度
+    source: s7
+    addr: "db:1:8"
+    type: float32
+    unit: degC
+    desc: S7 侧一次风温度(DB1.DBD8, REAL)
+    alarm_hi: 205.0
+    alarm_lo: 150.0
+    deadband: 2.0
+    alarm_level: 1
+
+  - name: S7给煤机转速
+    source: s7
+    addr: "db:1:12"
+    type: int16
+    unit: rpm
+    desc: S7 侧给煤机转速(DB1.DBW12, INT)
+
+  - name: S7累计运行小时
+    source: s7
+    addr: "db:1:14"
+    type: uint16
+    unit: h
+    desc: S7 侧累计运行时间(DB1.DBW14, UINT)
+
+  - name: S7运行标志
+    source: s7
+    addr: "db:1:16:0"
+    type: bool
+    desc: S7 侧运行标志(DB1.DBX16.0, BOOL)
+
+  - name: S7给煤机电流
+    source: s7
+    addr: "db:1:17"
+    type: float32
+    unit: A
+    desc: S7 侧给煤机电流(DB1.DBD17, REAL)
+    alarm_hi: 48.0
+    alarm_lo: 25.0
+    deadband: 1.5
+    alarm_level: 2
+
+  - name: S7二线磨机电流
+    source: s7
+    addr: "db:2:0"
+    type: float32
+    unit: A
+    desc: S7 侧二线磨机电流(DB2.DBD0, REAL)
+
+  # ================= AB: 罗克韦尔控制器 =================
+  - name: AB给煤量设定
+    source: eip
+    addr: "AB给煤量设定"
+    type: float
+    unit: t/h
+    desc: AB 侧给煤量设定值
+    alarm_hi: 4.0
+    alarm_lo: 0.8
+    deadband: 0.1
+    alarm_level: 2
+    writable: true
+
+  - name: AB给煤机转速
+    source: eip
+    addr: "AB给煤机转速"
+    type: int
+    unit: rpm
+    desc: AB 侧给煤机转速
+
+  - name: AB磨机电流
+    source: eip
+    addr: "AB磨机电流"
+    type: float
+    unit: A
+    desc: AB 侧磨机电流
+    alarm_hi: 48.0
+    alarm_lo: 25.0
+    deadband: 1.5
+    alarm_level: 2
+
+  - name: AB一次风温度
+    source: eip
+    addr: "AB一次风温度"
+    type: float
+    unit: degC
+    desc: AB 侧一次风温度
+    alarm_hi: 205.0
+    alarm_lo: 150.0
+    deadband: 2.0
+    alarm_level: 1
+
+  - name: AB运行标志
+    source: eip
+    addr: "AB运行标志"
+    type: bool
+    desc: AB 侧运行标志

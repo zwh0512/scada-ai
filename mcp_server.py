@@ -43,6 +43,7 @@ from mcp.server.mcpserver import MCPServer
 
 from drivers import AlarmEvent, Collector, PointTable, load_points
 from drivers.alarm import HI, LO, NORMAL
+from drivers.simulators import simulated_eip_overrides
 
 # asyncua 默认会打 DEBUG 日志, 订阅推送时每个值都打一行, 直接把 stderr 刷爆。
 # MCP 的 stderr 是给客户端看日志用的, 这里调到 WARNING 只留真正的告警。
@@ -539,6 +540,11 @@ def _assess(tag, lv, state: str, to_hi, to_lo, trend: dict) -> str:
 async def main() -> int:
     parser = argparse.ArgumentParser(description="scada-ai MCP Server")
     parser.add_argument("--points", default="points.yaml", help="点表路径")
+    parser.add_argument(
+        "--simulate-eip",
+        action="store_true",
+        help="用内置模拟器替代真实 AB 控制器(EtherNet/IP 没有现成的模拟器)",
+    )
     args = parser.parse_args()
 
     here = Path(__file__).resolve().parent
@@ -549,12 +555,17 @@ async def main() -> int:
     table = load_points(points_path)
     _log(f"[INFO] 点表: {points_path} ({len(table.points)} 个点位)")
 
+    overrides = simulated_eip_overrides(table) if args.simulate_eip else None
+    if args.simulate_eip:
+        _log(f"[INFO] 已启用 AB 控制器内置模拟器: {sorted(overrides or {})}")
+
     collector = Collector(
         table,
         on_status=lambda m: _log(m),
         on_alarm=lambda e: _log(
             f"[ALARM] {e.tag_name} {STATE_TEXT.get(e.state, e.state)} {e.value} {e.unit}"
         ),
+        driver_overrides=overrides,
     )
     _CTX["table"] = table
     _CTX["collector"] = collector

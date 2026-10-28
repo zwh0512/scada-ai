@@ -59,6 +59,7 @@ import pyqtgraph as pg
 from drivers import AlarmEvent, Collector, load_points
 from drivers.alarm import HI, LO, NORMAL
 from drivers.base import Tag
+from drivers.simulators import simulated_eip_overrides
 
 # 曲线保留的历史点数
 TREND_LENGTH = 240
@@ -89,9 +90,10 @@ class CollectorBridge(QObject):
     status_changed = Signal(str)
     connection_changed = Signal(bool)
 
-    def __init__(self, table):
+    def __init__(self, table, driver_overrides=None):
         super().__init__()
         self.table = table
+        self.driver_overrides = driver_overrides
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stop_event: asyncio.Event | None = None
 
@@ -126,6 +128,7 @@ class CollectorBridge(QObject):
             on_value=lambda tag, physical: self.value_changed.emit(tag.name, physical),
             on_alarm=self.alarm_raised.emit,
             on_status=self.status_changed.emit,
+            driver_overrides=self.driver_overrides,
         )
 
         await collector.start()
@@ -154,9 +157,9 @@ class CollectorThread(QThread):
       asyncio.Event, 干净利落。
     """
 
-    def __init__(self, table, parent=None):
+    def __init__(self, table, driver_overrides=None, parent=None):
         super().__init__(parent)
-        self.collector = CollectorBridge(table)
+        self.collector = CollectorBridge(table, driver_overrides)
 
     def run(self) -> None:
         self.collector.run()
@@ -258,9 +261,10 @@ class PointTableModel(QAbstractTableModel):
 # =====================================================================
 
 class MainWindow(QMainWindow):
-    def __init__(self, table):
+    def __init__(self, table, driver_overrides=None):
         super().__init__()
         self.table = table
+        self.driver_overrides = driver_overrides
         self.setWindowTitle("上位机原型 —— 上位机 + AI 融合")
         self.resize(1280, 780)
 
@@ -351,7 +355,7 @@ class MainWindow(QMainWindow):
 
     def _start_collector(self) -> None:
         """把采集放到独立线程。UI 线程从此只负责画。"""
-        self.thread = CollectorThread(self.table)
+        self.thread = CollectorThread(self.table, self.driver_overrides)
         self.collector = self.thread.collector
 
         # 跨线程信号 -> 队列连接, 自动切回 UI 线程
@@ -438,6 +442,11 @@ def main() -> int:
         action="store_true",
         help="演示模式: 把所有上限压到 0, 让报警立刻触发, 用来录 Demo 视频/自测报警面板",
     )
+    parser.add_argument(
+        "--simulate-eip",
+        action="store_true",
+        help="用内置模拟器替代真实 AB 控制器(EtherNet/IP 没有现成的模拟器)",
+    )
     args = parser.parse_args()
 
     here = Path(__file__).resolve().parent
@@ -446,6 +455,10 @@ def main() -> int:
         points_path = here / points_path
 
     table = load_points(points_path)
+
+    overrides = simulated_eip_overrides(table) if args.simulate_eip else None
+    if args.simulate_eip:
+        print(f"[模拟模式] AB 控制器已替换为内置模拟器: {sorted(overrides or {})}")
 
     if args.alarm_demo:
         # 演示模式: 上限压到 0, 任何正数都立刻越限, 报警面板马上有内容
@@ -463,7 +476,7 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setFont(QFont("Microsoft YaHei UI", 9))
 
-    win = MainWindow(table)
+    win = MainWindow(table, overrides)
     win.show()
 
     if args.shot:

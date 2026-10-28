@@ -81,6 +81,7 @@ class Collector:
         on_status: Callable[[str], None] | None = None,
         poll_period: float = 0.5,
         history_size: int = 300,
+        driver_overrides: dict[str, Any] | None = None,
     ):
         self.table = table
         self.engine = AlarmEngine(on_event=on_alarm)
@@ -101,6 +102,9 @@ class Collector:
         self._on_value = on_value
         self._on_status = on_status
         self._poll_period = poll_period
+        # 测试注入: {source名: 构造函数(cfg) -> Driver}
+        # 主要是给没法做模拟器的协议(AB EtherNet/IP)用
+        self._driver_overrides = driver_overrides
         self._stop_event: asyncio.Event | None = None
         self._poll_tasks: list[asyncio.Task] = []
 
@@ -111,7 +115,7 @@ class Collector:
     async def start(self) -> None:
         """连接所有驱动并开始采集。失败写 errors, 不抛异常。"""
         self.engine.register(self.table.points)
-        self.drivers = build_drivers(self.table)
+        self.drivers = build_drivers(self.table, self._driver_overrides)
 
         missing = check_coverage(self.table, self.drivers)
         if missing:

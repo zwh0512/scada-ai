@@ -3,10 +3,12 @@
 配合 `上位机AI融合学习路线.md` 走。目标: 用 Python 搭一套多协议工业数据采集底座,
 再通过 MCP 把现场数据接给大模型。
 
-![混合协议上位机](shots/scada_app_mixed.png)
+![四协议混合上位机](shots/scada_app_4proto.png)
 
-> 上图是一张点表同时挂着 **OPC UA(1-8 行, `ns=2;s=...`)和 Modbus(9-16 行, `hr:`/`ir:`/`co:`)**
-> 的运行画面 —— 16 个点位, 一个采集器, 一套报警引擎, 上层完全不知道底下有两种协议。
+> 上图是**一张点表同时挂四种协议**的运行画面, 29 个点位一个采集器:
+> 1-8 行 **OPC UA**(`ns=2;s=...`) · 9-16 行 **Modbus**(`hr:`/`ir:`/`co:`) ·
+> 17-24 行 **S7**(`db:1:0`) · 25-29 行 **AB EtherNet/IP**(标签名)
+> 一个报警引擎, 一套 MCP 工具, 上层完全不知道底下有四种协议。
 
 ## 这个项目解决什么问题
 
@@ -25,17 +27,17 @@
   drivers/collector.py  常驻采集器: 订阅 -> 值缓存 -> 报警引擎 -> 历史序列
         |
         v
-  drivers/opcua_driver.py | modbus_driver.py | (s7) | (eip)
+  drivers/  opcua_driver | modbus_driver | snap7_driver | eip_driver
         |
         v
-     现场设备 (OPC UA 服务器 / PLC / 仪表)
+     现场设备 (OPC UA 服务器 / 西门子 PLC / Modbus 仪表 / AB 控制器)
 ```
 
 上层(界面、MCP、大模型)**只认 `Tag` 和 `Driver` 这两个抽象**, 协议差异全在驱动层被吃掉。
 加一个新协议只要: 写个 driver → factory 加个分支 → 点表写 `source: xxx`, **上层一行不用改**。
 
-> `points_mixed.yaml` 就是这个设计的证据: **一张点表同时挂 OPC UA 和 Modbus**,
-> 16 个点位, 一个采集器, 一个报警引擎, 一套 MCP 工具, 界面和数据层完全无感。
+> `points_all4.yaml` 就是这个设计的证据: **一张点表同时挂四种协议**,
+> 29 个点位, 一个采集器, 一个报警引擎, 一套 MCP 工具, 界面和数据层完全无感。
 
 ## 当前进度
 
@@ -44,8 +46,9 @@
 | 准备 | venv + 依赖 + mock OPC UA server + 验证客户端 | ✅ 跑通 |
 | **阶段 1-2 核心** | **Driver 抽象层 + 点表 + 报警引擎 + PySide6 上位机** | ✅ **跑通 (2026-10-27)** |
 | **阶段 3** | **MCP Server —— 现场数据接给大模型 (6 个工具)** | ✅ **跑通 (2026-10-27)** |
-| **阶段 4** | **Modbus 驱动实测 + 混合协议点表 (OPC UA + Modbus 同表)** | ✅ **跑通 (2026-10-27 夜)** |
-| 阶段 5 | S7 / AB 驱动 + 接真实大模型 + 证书信任 | 未开始 |
+| **阶段 4** | **Modbus 驱动实测 + 混合协议点表** | ✅ **跑通 (2026-10-27 夜)** |
+| **阶段 5** | **S7 + AB(EtherNet/IP) 驱动 + 四协议同表** | ✅ **跑通 (2026-10-28)** |
+| 阶段 6 | 接真实大模型 + 证书信任 + Demo 视频 | 未开始 |
 
 ![报警演示](shots/scada_app_mixed_alarm.png)
 
@@ -85,16 +88,18 @@ cd C:\Users\Administrator\dev\projects\scada-ai
 .\run.ps1 test_pipeline.py     # OPC UA 管线 + 报警引擎
 .\run.ps1 test_mcp.py          # MCP 6 个工具端到端
 .\run.ps1 test_modbus.py       # Modbus 驱动 + 混合协议采集
+.\run.ps1 test_s7_eip.py       # S7 + AB 驱动 + 四协议同表采集
 .\run.ps1 test_mcp.py --points points_mixed.yaml --with-modbus   # 混合协议下的 MCP
 ```
 
-四套全绿才算过:
+五套全绿才算过:
 
 ```
 [OK]   test_pipeline.py                退出码=0   全部通过
 [OK]   test_mcp.py                     退出码=0   6 个工具 + 端到端链路验证通过
 [OK]   test_mcp.py --with-modbus       退出码=0   6 个工具 + 端到端链路验证通过
 [OK]   test_modbus.py                  退出码=0   Modbus 驱动 + 混合协议采集全部验证通过
+[OK]   test_s7_eip.py                  退出码=0   S7 + AB 驱动 + 四协议同表采集全部验证通过
 ```
 
 > 测试脚本起 mock server 前会**等端口真正释放**。上一轮的 server 还在退出中时
@@ -144,19 +149,25 @@ scada-ai/
 │   ├── point_table.py        #   YAML 点表加载 (+ 点位名唯一性校验)
 │   ├── opcua_driver.py       #   OPC UA  (asyncua, 支持订阅)
 │   ├── modbus_driver.py      #   Modbus  (pymodbus 异步, 只能轮询)
+│   ├── snap7_driver.py       #   S7      (python-snap7 异步, 只能轮询)
+│   ├── eip_driver.py         #   AB      (pycomm3, 只能轮询)
 │   ├── alarm.py              #   报警引擎 (ISA-18.2 简化模型)
 │   ├── factory.py            #   按 source 字段路由到驱动
-│   └── collector.py          #   ★ 协议无关采集器 (界面和 MCP 共用)
+│   ├── collector.py          #   ★ 协议无关采集器 (界面和 MCP 共用)
+│   └── simulators.py         #   ★ 内置 AB 模拟控制器
 ├── points.yaml               # 点表 (纯 OPC UA, 8 点位)
-├── points_mixed.yaml         # ★ 点表 (OPC UA + Modbus, 16 点位)
+├── points_mixed.yaml         # 点表 (OPC UA + Modbus, 16 点位)
+├── points_all4.yaml          # ★ 点表 (OPC UA + Modbus + S7 + AB, 29 点位)
 ├── app.py                    # PySide6 上位机
 ├── mcp_server.py             # ★ MCP Server (6 个工具接给大模型)
 ├── mock_opcua_server.py      # 模拟 OPC UA 设备
-├── mock_modbus_server.py     # ★ 模拟 Modbus TCP 设备 (活的)
+├── mock_modbus_server.py     # 模拟 Modbus TCP 设备 (活的)
+├── mock_s7_server.py         # ★ 模拟 S7-1200 PLC (活的)
 ├── check_client.py           # 客户端 5 步验证
 ├── test_pipeline.py          # 管线自测 (驱动+报警, 5 项)
 ├── test_mcp.py               # MCP 端到端自测 (6 个工具全调一遍)
-├── test_modbus.py            # ★ Modbus + 混合协议自测 (7 组)
+├── test_modbus.py            # Modbus + 混合协议自测 (7 组)
+├── test_s7_eip.py            # ★ S7 + AB + 四协议同表自测 (7 组)
 ├── test_curves.py            # 曲线数据自检
 ├── run.ps1                   # 启动器 (UTF-8 + venv)
 ├── shots/                    # 截图
@@ -444,6 +455,76 @@ collector.failed_sources      # {'modbus': '连不上 192.168.1.20:502'}
 
 MCP 工具 `read_values` 也会把每个源的状态带出来, 大模型能直接看出"哪台设备掉线了"。
 
+## S7 + AB(EtherNet/IP) 驱动 —— 四协议齐活
+
+```powershell
+# 终端 1: 起三个 mock
+.\run.ps1 mock_opcua_server.py
+.\run.ps1 mock_modbus_server.py
+.\run.ps1 mock_s7_server.py --port 10200
+
+# 终端 2: 四协议验收自测
+.\run.ps1 test_s7_eip.py
+
+# 终端 2 (或者): 四协议上位机
+.\run.ps1 app.py --points points_all4.yaml --simulate-eip
+```
+
+### S7: 大端, 不用配字节序
+
+点表地址 `db:1:0` = DB1 字节偏移 0。**S7 数据区是大端**, 同一个 float32:
+
+| | 字节 |
+|---|---|
+| S7 的 DB 里 | `42 C7 00 00` |
+| Modbus 里(可能是) | `00 00 C7 42` |
+
+**所以 S7 这边不用配字节序, 配了反而错。** 这是它和 Modbus 最关键的区别 ——
+Modbus 必须现场实测, S7 不用。
+
+支持的类型: `float32` / `int16` / `uint16` / `int32` / `uint32` / `float64` / `bool` / `string`
+(addr 第四段: `bool` 是位号, `string` 是最大长度)
+
+### AB: 标签名直接用
+
+```yaml
+- name: AB给煤量设定
+  source: eip
+  addr: "AB给煤量设定"                     # 自动补成 Program:MainProgram.AB给煤量设定
+- name: AB磨机电流
+  source: eip
+  addr: "Program:MainProgram.AB磨机电流"   # 显式完整路径, 原样使用
+```
+
+### EtherNet/IP 没有模拟器, 所以内置了一个
+
+OPC UA / Modbus / S7 都有现成的模拟器(独立进程), 但 EtherNet/IP 没有。
+所以 `drivers/simulators.py` 在**驱动层**提供了一个模拟的 AB 控制器:
+
+```powershell
+.\run.ps1 app.py --points points_all4.yaml --simulate-eip
+.\run.ps1 mcp_server.py --points points_all4.yaml --simulate-eip
+```
+
+这样任何人 clone 下来, 一条命令就能看到四个协议同时在跑 —— 演示和联调不用挂真 PLC。
+
+> **边界说明**: 模拟器只覆盖 AB 侧的**数据层**(标签路径映射 + 类型转换 + 活的值),
+> **不覆盖 EtherNet/IP 网络层**。接真 PLC 时不要用。
+> README 里写清楚了这一点, 不吹。
+
+### 三个协议库的"阻塞"问题 —— 一条通则
+
+| 协议库 | 异步版? | 怎么解决 |
+|---|---|---|
+| asyncua (OPC UA) | ✅ 原生异步 | 直接用 |
+| pymodbus (Modbus) | ✅ 有 `AsyncModbusTcpClient` | 换异步版 |
+| python-snap7 (S7) | ✅ 3.3.0 有 `AsyncClient` | 换异步版 |
+| pycomm3 (AB) | ❌ **没有** | `await asyncio.to_thread(...)` |
+
+**通则: 同步协议库在协程里必须挪到线程, 否则会阻塞整个事件循环。**
+一个协议的同步调用, 会把其它所有协议(OPC UA 订阅推送、轮询、MCP 工具调用)全卡住。
+这是"多协议混合"最容易踩、也最难查的坑 —— 现象是"界面偶尔卡一下", 根因却在网络层。
+
 ## 用 UaExpert 看地址空间
 
 UaExpert (免费, Unified Automation 出品) 装好后:
@@ -544,6 +625,31 @@ UaExpert (免费, Unified Automation 出品) 装好后:
 6. **点位名必须全局唯一**。值缓存、报警状态、SOE、MCP 工具全是按名字索引的,
    两个不同协议的同名点会互相覆盖 —— 界面上看着"有值", 实际读到的是另一个设备的数。
    现在 `load_points()` 加载时就直接报错, 不让这种错溜到运行期。
+
+## 踩过的坑 (python-snap7 3.3 / pycomm3 1.2)
+
+1. **python-snap7 的 `Server.start(tcp_port)` 的参数才是真正的监听端口**。
+   只设 `Parameter.LocalPort` 会被 `start()` 的默认值覆盖(102),
+   客户端连自己设的端口自然超时。**两个都设, 或者只认 start() 的参数。**
+
+2. **`register_area` 传进去的 `bytearray` 就是 PLC 的内存**。
+   客户端写进去的值会落到这块内存, 反过来我改这块内存客户端立刻能读到 ——
+   这就是"活的"模拟设备的原理, 不用起后台线程。
+
+3. **snap7 3.3.0 有 `AsyncClient`**, 别用同步的 `Client`。
+   同步的会阻塞事件循环(和 Modbus 一个毛病)。
+
+4. **pycomm3 没有异步版**。`open` / `read` / `write` 全是阻塞调用,
+   一律 `await asyncio.to_thread(...)` 包起来。
+
+5. **pycomm3 的标签路径是 `Program:MainProgram.标签名`**(程序名后面是**点**不是冒号)。
+   点表里只写标签名的话, 驱动按 `program` 配置补前缀。
+
+6. **pycomm3 的 `read()` 单个标签返回 Tag 对象, 多个返回 list** —— 得自己归一化,
+   否则 zip 会挂。
+
+7. **pycomm3 `LogixDriver.__init__` 的 `path` 支持三种写法**:
+   `10.20.30.100` / `10.20.30.100/1`(槽位) / 完整 CIP 路由路径。
 
 ## 常见问题: 推送失败 `curl 55 Send failure: Connection was reset`
 
