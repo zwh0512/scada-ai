@@ -545,7 +545,56 @@ UaExpert (免费, Unified Automation 出品) 装好后:
    两个不同协议的同名点会互相覆盖 —— 界面上看着"有值", 实际读到的是另一个设备的数。
    现在 `load_points()` 加载时就直接报错, 不让这种错溜到运行期。
 
-## 安全说明
+## 常见问题: 推送失败 `curl 55 Send failure: Connection was reset`
+
+> 这不是 git 用法问题, 是**网络层**问题, 而且现象极具迷惑性 ——
+> 对象明明传完了(`Writing objects: 100% ... done`), 最后一行却报 `fatal`,
+> 跟着又来一句 `Everything up-to-date`。**仓库其实是空的**, ref 没更新。
+
+排查步骤(真实案例, 2026-10-28):
+
+```powershell
+# 1. 先看远端到底有没有收到
+git ls-remote origin                 # 连不上 = 网络问题, 不是仓库问题
+Invoke-RestMethod https://api.github.com/repos/zwh0512/scada-ai   # API 走的路不一样
+
+# 2. 分层测: DNS / TCP / TLS 各测一遍
+Test-NetConnection github.com -Port 443
+curl.exe -s -o NUL -w "%{http_code} connect=%{time_connect} tls=%{time_appconnect}`n" https://github.com
+```
+
+本例的结论:
+
+| 目标 | 结果 |
+|---|---|
+| DNS 解析 github.com → 20.205.243.166 | ✅ 正常 |
+| TCP 443 → 20.205.243.166 | ⚠️ 间歇性超时 |
+| TLS 握手 → 20.205.243.166 | ✅ curl 能完成(0.97s) |
+| TLS 握手 → 140.82.112.3 / 20.27.177.113 | ❌ TCP 通但 TLS 握手卡死 |
+| TCP 22 → github.com (SSH) | ✅ 通 |
+
+**根因**: 同一批 GitHub 节点, 只有 DNS 给的那个能完成 TLS 握手, 换 IP 反而更糟。
+再叠上 git/curl 的 TLS 指纹和浏览器不一样, 容易被按指纹重置。
+**SSH 通道(端口 22/443)不受 TLS 指纹影响, 所以它一路通到底。**
+
+**解法(选一)**:
+
+```powershell
+# 推荐: 改走 SSH。已有 ed25519 key 的话最省事
+git remote set-url origin git@github.com:zwh0512/scada-ai.git
+git push -u origin main
+
+# 22 端口被封时的备用: 走 443
+git remote set-url origin ssh://git@ssh.github.com:443/zwh0512/scada-ai.git
+
+# 临时把 github.com 指向别的 IP (git 2.44+, 注意要带 + 前缀)
+git config --global http.curloptResolve "+github.com:443:140.82.112.3"
+```
+
+> 顺带一个坑: `http.curloptResolve` 的格式是 **`+HOST:PORT:ADDRESS`**,
+> 少了 `+` 的话配置根本不生效, 排查时会白忙一场。
+
+
 
 mock server 用的是 `None` 安全策略 + 匿名访问, **只用于本地开发**。
 现场生产必须是 `Basic256Sha256` + 用户名密码, 证书要进信任列表。
