@@ -250,6 +250,16 @@ async def main() -> int:
         action="store_true",
         help="同时起 mock Modbus server(配合 points_mixed.yaml 用)",
     )
+    parser.add_argument(
+        "--with-s7",
+        action="store_true",
+        help="同时起 mock S7 PLC(配合 points_all4.yaml 用)",
+    )
+    parser.add_argument(
+        "--simulate-eip",
+        action="store_true",
+        help="让 MCP server 用内置模拟器替代真实 AB 控制器",
+    )
     args = parser.parse_args()
 
     points_path = Path(args.points)
@@ -273,6 +283,17 @@ async def main() -> int:
             servers.append(mock_mb)
             print(f"[OK]   mock modbus pid={mock_mb.pid}")
 
+    if args.with_s7:
+        mock_s7 = start_server("mock_s7_server.py", 10200, "--port", "10200")
+        if mock_s7:
+            servers.append(mock_s7)
+            print(f"[OK]   mock s7 pid={mock_s7.pid}")
+
+    server_args = [str(HERE / "mcp_server.py"), "--points", str(points_path)]
+    if args.simulate_eip:
+        server_args.append("--simulate-eip")
+        print("[OK]   已启用 AB 控制器内置模拟器")
+
     try:
         if not wait_port("127.0.0.1", 4840, timeout=25.0):
             print("[FAIL] mock OPC UA 端口没起来")
@@ -286,7 +307,7 @@ async def main() -> int:
 
         params = StdioServerParameters(
             command=PY,
-            args=[str(HERE / "mcp_server.py"), "--points", str(points_path)],
+            args=server_args,
             cwd=str(HERE),
             env={"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
         )
