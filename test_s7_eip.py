@@ -26,13 +26,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import socket
 import subprocess
 import sys
-import time
 from pathlib import Path
 from typing import Any
 
+from mockctl import start_server, stop_all, wait_port
 from drivers import Collector, load_points
 from drivers.eip_driver import EipDriver
 from drivers.simulators import SimulatedLogix
@@ -60,50 +59,6 @@ def check(label: str, ok: bool, detail: str = "") -> bool:
     if not ok:
         _failures.append(label)
     return ok
-
-
-def wait_port(host: str, port: int, timeout: float = 20.0) -> bool:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            with socket.create_connection((host, port), timeout=1.0):
-                return True
-        except OSError:
-            time.sleep(0.3)
-    return False
-
-
-def wait_port_closed(host: str, port: int, timeout: float = 8.0) -> bool:
-    """等端口真正释放 —— 上一轮的 mock 可能还在退出中。"""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            with socket.create_connection((host, port), timeout=0.3):
-                time.sleep(0.3)
-        except OSError:
-            return True
-    return False
-
-
-def start_server(script: str, port: int, *args: str) -> subprocess.Popen | None:
-    if wait_port("127.0.0.1", port, timeout=0.5):
-        wait_port_closed("127.0.0.1", port, timeout=8.0)
-        if wait_port("127.0.0.1", port, timeout=0.5):
-            print(f"      (端口 {port} 被占用, 复用现成的 server)")
-            return None
-
-    proc = subprocess.Popen(
-        [PY, str(HERE / script), *args],
-        cwd=str(HERE),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    for _ in range(80):
-        if wait_port("127.0.0.1", port, timeout=0.2):
-            return proc
-        time.sleep(0.25)
-    proc.terminate()
-    raise RuntimeError(f"mock server {script} 启动失败, 端口 {port} 没起来")
 
 
 # =====================================================================
@@ -296,12 +251,7 @@ async def main() -> int:
         await test_eip(fake)
         await test_four(table, fake)
     finally:
-        for p in procs:
-            p.terminate()
-            try:
-                p.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                p.kill()
+        stop_all(procs)
 
     banner("结果")
     if _failures:

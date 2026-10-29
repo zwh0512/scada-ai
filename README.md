@@ -1,7 +1,10 @@
 # scada-ai —— 上位机 + AI 融合项目
 
-配合 `上位机AI融合学习路线.md` 走。目标: 用 Python 搭一套多协议工业数据采集底座,
-再通过 MCP 把现场数据接给大模型。
+用 Python 搭一套多协议工业数据采集底座, 再通过 MCP 把现场数据接给大模型。
+定位: **用 OPC UA + MCP 把工业现场接给大模型, 做能落地的智能运维。**
+
+> 项目配套有一份**个人学习路线文档**(在本地, 不进仓库 —— 里面是求职策略, 不是技术内容)。
+> 仓库里这份 README 是技术文档, 该有的细节都在这里。
 
 ![四协议混合上位机](shots/scada_app_4proto.png)
 
@@ -48,7 +51,8 @@
 | **阶段 3** | **MCP Server —— 现场数据接给大模型 (6 个工具)** | ✅ **跑通 (2026-10-27)** |
 | **阶段 4** | **Modbus 驱动实测 + 混合协议点表** | ✅ **跑通 (2026-10-27 夜)** |
 | **阶段 5** | **S7 + AB(EtherNet/IP) 驱动 + 四协议同表** | ✅ **跑通 (2026-10-28)** |
-| 阶段 6 | 接真实大模型 + 证书信任 + Demo 视频 | 未开始 |
+| **阶段 6** | **接真实大模型 —— 现场数据 → 规则判断 → 大模型根因推理 → 诊断报告** | ✅ **跑通 (2026-10-29)** |
+| 阶段 7 | 证书信任实战 (Basic256Sha256 + UaExpert) + Demo 视频 + 简历 | 未开始 |
 
 ![报警演示](shots/scada_app_mixed_alarm.png)
 
@@ -73,6 +77,9 @@ cd C:\Users\Administrator\dev\projects\scada-ai
 
 # 终端 2 (或者): 无界面自测
 .\run.ps1 test_pipeline.py
+
+# 终端 2 (或者): 一条命令看完整 AI 诊断闭环 (自动起 mock + MCP + 大模型)
+.\run.ps1 llm_diagnose.py
 ```
 
 `run.ps1` 干三件事: `chcp 65001` + `PYTHONUTF8=1` (否则中文乱码) + 用项目 venv 的 python。
@@ -89,10 +96,11 @@ cd C:\Users\Administrator\dev\projects\scada-ai
 .\run.ps1 test_mcp.py          # MCP 6 个工具端到端
 .\run.ps1 test_modbus.py       # Modbus 驱动 + 混合协议采集
 .\run.ps1 test_s7_eip.py       # S7 + AB 驱动 + 四协议同表采集
+.\run.ps1 test_alarm_soe.py    # 报警触发 / 死区恢复 / SOE 历史 (慢, 要等仿真数据自然越限)
 .\run.ps1 test_mcp.py --points points_mixed.yaml --with-modbus   # 混合协议下的 MCP
 ```
 
-五套全绿才算过:
+七套全绿才算过:
 
 ```
 [OK]   test_pipeline.py                退出码=0   全部通过
@@ -100,7 +108,12 @@ cd C:\Users\Administrator\dev\projects\scada-ai
 [OK]   test_mcp.py --with-modbus       退出码=0   6 个工具 + 端到端链路验证通过
 [OK]   test_modbus.py                  退出码=0   Modbus 驱动 + 混合协议采集全部验证通过
 [OK]   test_s7_eip.py                  退出码=0   S7 + AB 驱动 + 四协议同表采集全部验证通过
+[OK]   test_alarm_soe.py               退出码=0   报警触发 / 死区恢复 / SOE 历史 全链路验证通过
 ```
+
+> `test_alarm_soe.py` 是唯一一个**要等**的: 它不注入假值, 等 mock 的仿真数据自己越限
+> (Line2 一次风温度 `195+sin(tick/30)*12`, 峰值 207 > 上限 205), 走的是和现场一模一样的路径。
+> 通常 20~30 秒触发, 加上等死区恢复, 整个跑完约 60~110 秒。
 
 > 测试脚本起 mock server 前会**等端口真正释放**。上一轮的 server 还在退出中时
 > 端口照样能连上, 新 server 绑不上, 测试就会连到"正在死"的那个 —— 偶发失败就是这么来的。
@@ -160,6 +173,9 @@ scada-ai/
 ├── points_all4.yaml          # ★ 点表 (OPC UA + Modbus + S7 + AB, 29 点位)
 ├── app.py                    # PySide6 上位机
 ├── mcp_server.py             # ★ MCP Server (6 个工具接给大模型)
+├── llm_client.py             # ★ 百炼 OpenAI 兼容接口封装 (标准库 urllib, 零新依赖)
+├── llm_diagnose.py           # ★ MCP 客户端 + Qwen 工具调用循环 + 诊断报告
+├── mockctl.py                # mock server 起停共用模块 (测试脚本去重)
 ├── mock_opcua_server.py      # 模拟 OPC UA 设备
 ├── mock_modbus_server.py     # 模拟 Modbus TCP 设备 (活的)
 ├── mock_s7_server.py         # ★ 模拟 S7-1200 PLC (活的)
@@ -168,8 +184,10 @@ scada-ai/
 ├── test_mcp.py               # MCP 端到端自测 (6 个工具全调一遍)
 ├── test_modbus.py            # Modbus + 混合协议自测 (7 组)
 ├── test_s7_eip.py            # ★ S7 + AB + 四协议同表自测 (7 组)
+├── test_alarm_soe.py         # ★ 报警触发/死区恢复/SOE 历史 全链路自测
 ├── test_curves.py            # 曲线数据自检
 ├── run.ps1                   # 启动器 (UTF-8 + venv)
+├── .env.example              # API Key 模板 (真实 key 只在 .env, 不进版本库)
 ├── shots/                    # 截图
 └── requirements.txt
 ```
@@ -355,6 +373,108 @@ MCP server 进程自己持有 OPC UA 订阅, 值一直在 `collector.values` 缓
 
 > 注意: Claude Desktop 不会帮你起 mock server, 得自己先 `.\run.ps1` 把 mock 起了,
 > 否则 MCP server 连不上现场会直接退出(退出码 1, 错误信息在 Claude Desktop 的日志里)。
+
+## 大模型诊断 —— 现场数据真的喂给大模型了
+
+到这一步整条链路才真正闭合:
+
+```
+现场设备 → 采集器 → 报警引擎 → MCP 工具 → qwen-plus → 诊断报告
+```
+
+```powershell
+# 真实大模型 (需要 .env 里有 DASHSCOPE_API_KEY)
+.\run.ps1 llm_diagnose.py
+.\run.ps1 llm_diagnose.py --question "给煤机实际量是不是偏低？" --model qwen-max
+
+# 没 key 也能跑: 用规则模拟大模型, 验证 MCP 工具调用链路
+.\run.ps1 llm_diagnose.py --offline
+```
+
+### 真实运行输出 (实测)
+
+**调哪些工具是大模型自己决定的, 不是脚本写死的** —— 这才是 MCP 的意义:
+
+```
+--------------------------------------------------------------
+  诊断过程
+--------------------------------------------------------------
+   [第 1 轮] 模型要求调 2 个工具, 自带正文 62 字
+   -> 调工具 search_tags({"keyword": "磨机电流"})
+   -> 调工具 search_tags({"keyword": "给煤量"})
+   [第 2 轮] 模型要求调 2 个工具, 自带正文 54 字
+   -> 调工具 diagnose_tag({"tag_name": "磨机电流"})
+   -> 调工具 diagnose_tag({"tag_name": "给煤机实际量"})
+   [第 3 轮] 模型要求调 2 个工具, 自带正文 32 字
+   -> 调工具 get_alarms({"scope": "active"})
+   -> 调工具 get_alarms({"scope": "history", "limit": 10})
+   [第 4 轮] 模型要求调 0 个工具, 自带正文 1396 字
+```
+
+报告节选 (模型自己写的):
+
+> **根因分析**
+> 1. *磨机电流稳定但略高*: 42.18 A 接近上限 48 A (余量仅 5.82 A), 结合一次风温度 185℃ 偏高,
+>    可能表明磨机负荷较重或煤质偏湿, 需要关注磨机振动和轴承温度
+> 2. *给煤量持续上升但未达设定值*: 实际量比设定值 2.50 t/h 低 0.35 t/h (偏差约 14%)。
+>    可能是给煤控制系统 PID 调节滞后 / 皮带张力与清扫器轻微堵塞 / 煤质湿度变化
+>
+> **处置建议**
+> - 安排检查给煤机清扫器和皮带张紧度, 确保无积煤和打滑现象
+> - 核对给煤机称重传感器校准状态, 特别是零点漂移
+> - 如趋势持续, 需重新整定给煤控制回路 PID 参数, 重点关注积分时间调整
+
+### 关键设计: 规则给事实, 大模型做推理
+
+这是整个项目最重要的一条设计。
+
+| 谁干什么 | 内容 |
+|---|---|
+| 上位机(规则) | 阈值余量 / 趋势方向 / 死区状态 / SOE / 同源快照 —— **算好的事实** |
+| 大模型 | 根因推理 / 多点关联 / 处置建议 —— **需要经验的部分** |
+
+让大模型自己算"距上限还有多少", 它会算错, 而且没法追溯。
+上位机算好再给它, 它只负责推理 —— **结论可复核, 也不容易编数字**。
+
+`diagnose_tag` 返回的 `assessment` 字段, 就是上位机用规则算好的那句话;
+SYSTEM_PROMPT 里明确写了"那是**事实的一部分**, 不是你的结论"。
+
+### 为什么不装 openai SDK
+
+`llm_client.py` 只用标准库 `urllib` 直接调百炼的 OpenAI 兼容接口:
+
+- 项目已经是标准库风格, 再引一个 SDK 多一份依赖
+- 百炼兼容接口就两个 HTTP 端点, 自己封装更可控
+- clone 下来 `uv pip install -r requirements.txt` 就能跑, 不用额外装东西
+
+```python
+req = urllib.request.Request(
+    "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+    data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+    headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"},
+    method="POST",
+)
+```
+
+Key 的查找顺序: 环境变量 `DASHSCOPE_API_KEY` → 项目 `.env` → 同机其它项目的 `.env`。
+`.env` 已在 `.gitignore` 里, `.env.example` 是模板。
+
+### MCP 工具定义怎么转成 function calling
+
+MCP 的 `list_tools()` 返回的 `input_schema` **本身就是 JSON Schema**, 转一下就能喂给模型:
+
+```python
+{
+  "type": "function",
+  "function": {
+    "name": t.name,
+    "description": t.description,     # 工具描述就是给模型看的
+    "parameters": t.input_schema,    # MCP 原生 schema, 不用手写
+  }
+}
+```
+
+**不用自己手写 tool 定义** —— MCP server 里写了什么, 模型看到的就是什么。
 
 ## Modbus 驱动 + 混合协议点表
 
@@ -650,6 +770,45 @@ UaExpert (免费, Unified Automation 出品) 装好后:
 
 7. **pycomm3 `LogixDriver.__init__` 的 `path` 支持三种写法**:
    `10.20.30.100` / `10.20.30.100/1`(槽位) / 完整 CIP 路由路径。
+
+## 踩过的坑 (接真实大模型)
+
+接百炼 Qwen 跑通 agent 循环踩的, 结论直接抄:
+
+1. **qwen-plus 会"话说一半就停"** —— 第一次实测, 模型调完 `read_values` 之后只输出了
+   一句 "现在让我获取所有相关点位的实时值：" 就没下文了, 报告是空的。
+   解法: 兜一层**强制总结** —— 轮次用完或者正文过短时, **不带 tools** 再问一次,
+   逼它把报告写出来。这是 agent 的标准做法, 不是 hack。
+
+2. **回传 assistant 消息时 tool_calls 必须还原成 OpenAI 标准形状**。
+   `function.arguments` 是 **JSON 字符串**, 不是对象:
+
+   ```python
+   {"id": "call_x", "type": "function",
+    "function": {"name": "diagnose_tag", "arguments": "{\"tag_name\": \"磨机电流\"}"}}
+   ```
+
+   写成嵌套 dict 百炼直接 400。
+
+3. **MCP 的 tool 消息必须带 `tool_call_id`**, 和 assistant 消息里的 id 对上。
+   对不上模型就认为工具调用链断了, 下一轮开始瞎编。
+
+4. **stdout / stderr 缓冲不同, 日志顺序会骗人**。
+   `mcp_server.py` 的日志走 stderr, `llm_diagnose.py` 的走 stdout, 两个流的缓冲策略不一样,
+   交错输出看起来像"起了两个进程"。
+   判断到底起没起重复进程, **要看进程表, 不能看日志顺序**。
+
+5. **一次完整诊断烧 1.1 万 ~ 1.6 万 prompt token**。
+   原因是 `diagnose_tag` 一次返回了完整趋势序列 + 同源快照, 结构很肥。
+   生产上要裁剪(只给最近 N 个采样点、相关点只给同名源的关键几个)。
+   免费额度够学习和小规模测试, 上生产必须先做这层优化。
+
+6. **没有 API Key 时百炼返回 401 是好事** —— 说明网络通、端点地址对。
+   带 key 才 401 才是 key 的问题。别把这两件事搞混。
+
+7. **给模型的 system prompt 要压住"编数字"的倾向**。
+   明确写"工具没返回的数据不要编, 不确定就明说不确定",
+   并且告诉它 `diagnose_tag` 的 `assessment` 是**上位机算好的事实, 不是你的结论**。
 
 ## 常见问题: 推送失败 `curl 55 Send failure: Connection was reset`
 

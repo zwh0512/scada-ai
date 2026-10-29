@@ -18,16 +18,15 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import socket
 import subprocess
 import sys
-import time
 from pathlib import Path
 from typing import Any
 
 from mcp import Client
 from mcp.client.stdio import StdioServerParameters
 
+from mockctl import start_server, stop_all, wait_port
 from drivers import load_points
 
 HERE = Path(__file__).resolve().parent
@@ -83,56 +82,6 @@ def payload(result: Any) -> Any:
             except (json.JSONDecodeError, TypeError):
                 return text
     return None
-
-
-def wait_port(host: str, port: int, timeout: float = 20.0) -> bool:
-    """等 mock server 的端口起来。"""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            with socket.create_connection((host, port), timeout=1.0):
-                return True
-        except OSError:
-            time.sleep(0.3)
-    return False
-
-
-def wait_port_closed(host: str, port: int, timeout: float = 8.0) -> bool:
-    """等端口真正释放。
-
-    上一轮测试的 mock server 可能还在退出中 —— 这时候端口照样能连上,
-    新起的 server 绑不上去, 测试就会连到那个"正在死"的 server, 偶发失败。
-    """
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            with socket.create_connection((host, port), timeout=0.3):
-                time.sleep(0.3)
-        except OSError:
-            return True
-    return False
-
-
-def start_server(script: str, port: int, *args: str) -> subprocess.Popen | None:
-    """起 mock server。端口上已经有在跑的就直接复用, 不重复起。"""
-    if wait_port("127.0.0.1", port, timeout=0.5):
-        wait_port_closed("127.0.0.1", port, timeout=8.0)
-        if wait_port("127.0.0.1", port, timeout=0.5):
-            print(f"      (端口 {port} 被占用, 复用现成的 server)")
-            return None
-
-    proc = subprocess.Popen(
-        [PY, str(HERE / script), *args],
-        cwd=str(HERE),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    for _ in range(80):
-        if wait_port("127.0.0.1", port, timeout=0.2):
-            return proc
-        time.sleep(0.25)
-    proc.terminate()
-    raise RuntimeError(f"mock server {script} 启动失败, 端口 {port} 没起来")
 
 
 # =====================================================================
@@ -323,12 +272,7 @@ async def main() -> int:
 
             await run_checks(client)
     finally:
-        for p in servers:
-            p.terminate()
-            try:
-                p.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                p.kill()
+        stop_all(servers)
 
     banner("结果")
     if _failures:
